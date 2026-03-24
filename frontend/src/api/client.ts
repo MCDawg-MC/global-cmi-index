@@ -1,44 +1,67 @@
-import axios from 'axios';
+/**
+ * API client — uses synthetic data engine client-side.
+ * No backend required: all data is generated deterministically from
+ * the Macro Momentum formula with realistic country-specific parameters.
+ *
+ * To switch to a live backend, set VITE_API_URL and set VITE_USE_MOCK=false.
+ */
 import type { Country, CountryMomentum, TimeseriesPoint, CompareCountryData } from '../types';
+import {
+  getCountries,
+  getCountryMomentum,
+  getTimeseries,
+  getCompare,
+} from '../data/mockEngine';
 
-// In dev, Vite proxies /api → localhost:8000, so use empty base URL.
-// In production or Docker, set VITE_API_URL explicitly.
-const BASE_URL = import.meta.env.VITE_API_URL || '';
+const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';
 
-const api = axios.create({
-  baseURL: BASE_URL,
-  timeout: 30000,
-});
+// Simulated network latency (ms) — makes the UI feel real
+const delay = (ms = 120) => new Promise(res => setTimeout(res, ms));
+
+// ---------------------------------------------------------------------------
+// Live API client (only used when VITE_USE_MOCK=false)
+// ---------------------------------------------------------------------------
+async function liveGet<T>(path: string, params?: Record<string, string>): Promise<T> {
+  const base = import.meta.env.VITE_API_URL || '';
+  const url  = new URL(`${base}${path}`, window.location.origin);
+  if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
+  const res = await fetch(url.toString(), { headers: { 'Content-Type': 'application/json' } });
+  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`);
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
 
 export const fetchCountries = async (): Promise<Country[]> => {
-  const { data } = await api.get<Country[]>('/api/countries');
-  return data;
+  if (USE_MOCK) { await delay(80); return getCountries(); }
+  return liveGet<Country[]>('/api/countries');
 };
 
 export const fetchCountryMomentum = async (code: string): Promise<CountryMomentum> => {
-  const { data } = await api.get<CountryMomentum>(`/api/momentum/${code}`);
-  return data;
+  if (USE_MOCK) { await delay(100); return getCountryMomentum(code); }
+  return liveGet<CountryMomentum>(`/api/momentum/${code}`);
 };
 
 export const fetchTimeseries = async (code: string): Promise<TimeseriesPoint[]> => {
-  const { data } = await api.get<TimeseriesPoint[]>(`/api/momentum/timeseries/${code}`);
-  return data;
+  if (USE_MOCK) { await delay(80); return getTimeseries(code); }
+  return liveGet<TimeseriesPoint[]>(`/api/momentum/timeseries/${code}`);
 };
 
 export const fetchCompare = async (codes: string[]): Promise<CompareCountryData[]> => {
-  const { data } = await api.get<CompareCountryData[]>('/api/momentum/compare', {
-    params: { countries: codes.join(',') },
-  });
-  return data;
+  if (USE_MOCK) { await delay(120); return getCompare(codes); }
+  return liveGet<CompareCountryData[]>('/api/momentum/compare', { countries: codes.join(',') });
 };
 
 export const triggerDataUpdate = async (): Promise<void> => {
-  await api.post('/api/data/update');
+  if (USE_MOCK) { await delay(200); return; }
+  await fetch(`${import.meta.env.VITE_API_URL || ''}/api/data/update`, { method: 'POST' });
 };
 
 export const fetchHealth = async () => {
-  const { data } = await api.get('/api/health');
-  return data;
+  if (USE_MOCK) { await delay(30); return { status: 'ok', mode: 'synthetic' }; }
+  return liveGet('/api/health');
 };
 
-export default api;
+export default { fetchCountries, fetchCountryMomentum, fetchTimeseries, fetchCompare };
